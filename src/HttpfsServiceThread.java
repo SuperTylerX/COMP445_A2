@@ -9,21 +9,21 @@ public class HttpfsServiceThread implements Runnable {
 
     private String directory;
     private String filePath;
-    private String method;
     private Path path;
     private File file;
+    private Request request;
 
     public HttpfsServiceThread(HttpfsService hfs, Request request) {
         this.directory = hfs.getDirectory();
         this.filePath = request.getPath();
-        this.method = request.getMethod();
         this.path = Paths.get(directory + filePath);
         this.file = new File(path.toString());
+        this.request = request;
     }
 
     public void run() {
 
-        if (method.equals("GET")) {
+        if (request.getMethod().equals("GET")) {
             if (file.exists()) {
                 if (file.isDirectory()) {
                     readDirectoryHandler();
@@ -34,7 +34,7 @@ public class HttpfsServiceThread implements Runnable {
                 fileNotExistHandler();
             }
 
-        } else if (method.equals("POST")) {
+        } else if (request.getMethod().equals("POST")) {
             writeFileHandler();
         }
 
@@ -77,5 +77,14 @@ public class HttpfsServiceThread implements Runnable {
 
     public static String getMIME(Path path) throws IOException {
         return Files.probeContentType(path);
+    }
+
+    public boolean isInsideFolder(){
+        // TODO:
+        return false;
+    }
+
+    public void noPermissionHandler(){
+//        TODO: Create a 404 Response
     }
 }

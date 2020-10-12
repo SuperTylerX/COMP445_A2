@@ -1,4 +1,5 @@
 import java.util.HashMap;
+import java.util.Map;
 
 public class Response {
 
@@ -12,6 +13,9 @@ public class Response {
         this.body = body;
     }
 
+    public Response() {
+    }
+
     public String getStatus() {
         return status;
     }
@@ -22,5 +26,33 @@ public class Response {
 
     public String getBody() {
         return body;
+    }
+
+    public void setStatus(String status) {
+        this.status = status;
+    }
+
+    public void setHeaders(HashMap<String, String> headers) {
+        this.headers = headers;
+    }
+
+    public void setBody(String body) {
+        this.body = body;
+    }
+
+    @Override
+    public String toString() {
+        String statusLine = "HTTP/1.0 " + status + "\r\n";
+        String headerLines = "";
+        String body=this.getBody();
+        String res="";
+
+        for (Map.Entry<String, String> entry : this.getHeaders().entrySet()) {
+            headerLines = headerLines.concat(entry.getKey()).concat(": ").concat(entry.getValue()).concat("\r\n");
+        }
+        headerLines = headerLines.concat("\r\n");
+        res=statusLine.concat(headerLines).concat(body);
+
+        return res;
     }
 }

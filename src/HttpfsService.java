@@ -4,7 +4,7 @@ public class HttpfsService {
 
     private static final int DEFAULT_PORT = 8080;
     private static final boolean DEFAULT_IS_DEBUG = false;
-    private static final String DEFAULT_DIRECTORY = ".";
+    public static final String DEFAULT_DIRECTORY = ".";
 
     private boolean isDebug;
     private int port;

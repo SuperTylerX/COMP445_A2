@@ -19,18 +19,23 @@ public class HttpfsServiceThread implements Runnable {
     private Request request;
     private Response response;
 
+    private boolean isDebug;
+
 
     public HttpfsServiceThread(HttpfsService hfs, Request request) {
         this.directory = hfs.getDirectory();
         this.filePath = request.getPath();
-        this.path = Paths.get(directory + filePath);
+        this.path = Paths.get(filePath);
+//        this.path = Paths.get(directory + filePath);
         this.file = new File(path.toString());
         this.request = request;
         this.response = new Response();
+
+        this.isDebug = hfs.isDebug();
+
     }
 
     public void run() {
-
         if (request.getMethod().equals("GET")) {
             if (file.exists()) {
                 if (file.isDirectory()) {
@@ -57,92 +62,116 @@ public class HttpfsServiceThread implements Runnable {
             //todo make the request 405
             methodNotAllowedHandler();
         }
-        System.out.println(this.response.toString());
+        if (isDebug) {
+            System.out.println(this.response.toString());
+        }
 
     }
 
     public void readDirectoryHandler() {
-
-        String status = "200 OK";
-        String body = "";
-        HashMap headers = new HashMap<>();
-
-        System.out.println("Directory!");
-        File[] tempFileList = file.listFiles();
-        for (int i = 0; i < Objects.requireNonNull(tempFileList).length; i++) {
-            if (tempFileList[i].isFile()) {
-                body = body.concat("File: " + tempFileList[i].getName() + "\r\n");
-                System.out.println("File: " + tempFileList[i].getName());
-            } else if (tempFileList[i].isDirectory()) {
-                body = body.concat("Directory: " + tempFileList[i].getName());
-
-                System.out.println("Directory: " + tempFileList[i].getName());
+        if (isInsideFolder()) {
+            String status = "200 OK";
+            String body = "";
+            HashMap headers = new HashMap<>();
+            if (isDebug) {
+                System.out.println("Directory!");
             }
-        }
-        headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
-        headers.put("content-disposition", "inline");
+            File[] tempFileList = file.listFiles();
+            for (int i = 0; i < Objects.requireNonNull(tempFileList).length; i++) {
+                if (tempFileList[i].isFile()) {
+                    body = body.concat("File: " + tempFileList[i].getName() + "\r\n");
+                    if (isDebug) {
+                        System.out.println("File: " + tempFileList[i].getName());
+                    }
+                } else if (tempFileList[i].isDirectory()) {
+                    body = body.concat("Directory: " + tempFileList[i].getName());
+                    if (isDebug) {
+                        System.out.println("Directory: " + tempFileList[i].getName());
+                    }
+                }
+            }
+            headers.put("content-type", "text/plain");
+            headers.put("content-length", String.valueOf(body.length()));
+            headers.put("content-disposition", "inline");
 
-        this.response = new Response(status, headers, body);
+            this.response = new Response(status, headers, body);
+        } else {
+            noPermissionHandler();
+        }
     }
 
 
     public void readFileHandler() {
-        String status = "200 OK";
-        String body = "";
-        HashMap headers = new HashMap<>();
-
-        System.out.println("File!");
-        // This is a sample of getting the MIME type for content-Type Header
-        try {
-            System.out.println(getMIME(path));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-//        TODO: Read a File
-        String fileContent="";
-        Scanner myReader = null;
-        try {
-            myReader = new Scanner(this.file);
-            while (myReader.hasNextLine()) {
-                String data = myReader.nextLine();
-                fileContent=fileContent.concat(data);
-
-                System.out.println(data);
+        if (isInsideFolder()) {
+            String status = "200 OK";
+            String body = "";
+            HashMap headers = new HashMap<>();
+            if (isDebug) {
+                System.out.println("File!");
             }
-            myReader.close();
-        } catch (FileNotFoundException e) {
-            e.printStackTrace();
+            // This is a sample of getting the MIME type for content-Type Header
+            try {
+                if (isDebug) {
+                    System.out.println(getMIME(path));
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+//        TODO: Read a File
+            String fileContent = "";
+            Scanner myReader = null;
+            try {
+                myReader = new Scanner(this.file);
+                while (myReader.hasNextLine()) {
+                    String data = myReader.nextLine();
+                    fileContent = fileContent.concat(data);
+                    if (isDebug) {
+                        System.out.println(data);
+                    }
+                }
+                myReader.close();
+            } catch (FileNotFoundException e) {
+                e.printStackTrace();
+            }
+            body = fileContent;
+            headers.put("content-type", "text/plain");
+            headers.put("content-length", String.valueOf(body.length()));
+            headers.put("content-disposition", "attachment; filename=\"new_file.txt\"");
+            this.response = new Response(status, headers, body);
+        } else {
+            noPermissionHandler();
         }
-        body=fileContent;
-        headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
-        headers.put("content-disposition", "attachment; filename=\"new_file.txt\"");
-        this.response=new Response(status,headers,body);
-
     }
 
     public void writeFileHandler() {
-        System.out.println("Writing a file!");
-        // TODO: Write to file
-        try {
-            FileWriter fr = new FileWriter(this.file, true);
-            fr.write(this.request.getBody());
-            fr.close();
-        } catch (IOException e) {
-            e.printStackTrace();
+        if (isInsideFolder()) {
+            if (isDebug) {
+                System.out.println("Writing a file!");
+            }
+            // TODO: Write to file
+            try {
+                FileWriter fr = new FileWriter(this.file, true);
+                fr.write(this.request.getBody());
+                fr.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+
+            String status = "200 OK";
+            HashMap headers = new HashMap<>();
+
+            String body = "Write succesful";
+
+            this.response = new Response(status, headers, body);
+        } else {
+            noPermissionHandler();
         }
-
-        String status = "200 OK";
-        HashMap headers = new HashMap<>();
-        String body = "Write succesful";
-
-        this.response = new Response(status, headers, body);
-
     }
 
     public void fileNotExistHandler() {
-        System.out.println("File does not exist!");
+        if (isDebug) {
+            System.out.println("File does not exist!");
+        }
         // TODO: Create a 404 Response
         String status = "404 Not Found";
         String body = "404 File does not exist!";
@@ -160,14 +189,27 @@ public class HttpfsServiceThread implements Runnable {
     }
 
     public boolean isInsideFolder() {
-        // TODO:
-        return false;
+
+        if (isDebug) {
+            System.out.println("valid path: " + this.directory);
+            System.out.println("filepath: " + this.filePath);
+            System.out.println(this.file);
+        }
+        if (this.directory.equals(HttpfsService.DEFAULT_DIRECTORY)) {
+            return true;
+        }
+        if (this.filePath.contains(this.directory)) {
+            return true;
+        } else {
+            return false;
+        }
+
     }
 
     public void noPermissionHandler() {
-//        TODO: Create a 403 Response
-        String status = "403 Forbidden";
-        String body = "403 Forbidden";
+//        TODO: Create a 403 file forbidden Response
+        String status = "403 file path control: Forbidden";
+        String body = "403 file path control: Forbidden";
 
         HashMap headers = new HashMap<>();
         headers.put("content-type", "text/plain");
@@ -188,7 +230,7 @@ public class HttpfsServiceThread implements Runnable {
         headers.put("content-length", String.valueOf(body.length()));
         headers.put("content-disposition", "inline");
 
-       this.response = new Response(status, headers, body);
+        this.response = new Response(status, headers, body);
 
     }
 }

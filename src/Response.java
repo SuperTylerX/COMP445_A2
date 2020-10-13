@@ -11,6 +11,8 @@ public class Response {
         this.status = status;
         this.headers = headers;
         this.body = body;
+        this.headers.put("content-length", String.valueOf(this.body.length()));
+        this.headers.put("server", "Concordia/COMP445A2");
     }
 
     public Response() {
@@ -44,14 +46,14 @@ public class Response {
     public String toString() {
         String statusLine = "HTTP/1.0 " + status + "\r\n";
         String headerLines = "";
-        String body=this.getBody();
-        String res="";
+        String body = this.getBody();
+        String res = "";
 
         for (Map.Entry<String, String> entry : this.getHeaders().entrySet()) {
             headerLines = headerLines.concat(entry.getKey()).concat(": ").concat(entry.getValue()).concat("\r\n");
         }
         headerLines = headerLines.concat("\r\n");
-        res=statusLine.concat(headerLines).concat(body);
+        res = statusLine.concat(headerLines).concat(body);
 
         return res;
     }

@@ -4,7 +4,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Scanner;
 import java.io.FileNotFoundException;
@@ -17,7 +16,6 @@ import static java.lang.Thread.sleep;
 public class HttpfsServiceThread extends Thread {
 
     private String directory;
-    private String filePath;
     private Path path;
     private File file;
     private Request request;
@@ -28,8 +26,7 @@ public class HttpfsServiceThread extends Thread {
 
     public HttpfsServiceThread(HttpfsService hfs, Request request) {
         this.directory = hfs.getDirectory();
-        this.filePath = request.getPath();
-//        this.path = Paths.get(filePath);
+        String filePath = request.getPath();
         this.path = Paths.get(directory + filePath);
         this.file = new File(path.toString());
         this.request = request;
@@ -40,82 +37,68 @@ public class HttpfsServiceThread extends Thread {
     }
 
     public void run() {
-        //muti thread part
-        RandomAccessFile raf = null;
-        FileChannel fc = null;
-        FileLock fl = null;
 
-        if (request.getMethod().equals("GET")) {
-            if (file.exists()) {
-                if (file.isDirectory()) {
-                    readDirectoryHandler();
+        if (!isInsideFolder()) {
+            noPermissionResponseHandler();
+        } else {
+            if (request.getMethod().equals("GET")) {
+                if (file.exists()) {
+                    if (file.isDirectory()) {
+                        readDirectoryHandler();
+                    } else {
+                        readFileHandler();
+                    }
                 } else {
-                    readFileHandler();
+                    fileNotExistResponseHandler();
                 }
-            } else {
-                fileNotExistHandler();
-            }
 
-        } else if (request.getMethod().equals("POST")) {
-            if (file.exists()) {
-                if (file.isDirectory()) {
-                    fileNotExistHandler();
+            } else if (request.getMethod().equals("POST")) {
+                if (file.exists()) {
+                    if (file.isDirectory()) {
+                        fileNotExistResponseHandler();
+                    } else {
+                        writeFileHandler();
+                    }
                 } else {
                     writeFileHandler();
                 }
-            } else {
-                writeFileHandler();
-            }
 
-        } else {
-            //todo make the request 405
-            methodNotAllowedHandler();
+            } else {
+                methodNotAllowedResponseHandler();
+            }
         }
+
         if (isDebug) {
+            System.out.println("\n<<<<<<<<<<<<<<<<<<<<<<<<");
             System.out.println(this.response.toString());
+            System.out.println("<<<<<<<<<<<<<<<<<<<<<<<<\r\n");
         }
 
     }
 
     public void readDirectoryHandler() {
-        if (isInsideFolder()) {
-            String status = "200 OK";
-            String body = "";
-            HashMap headers = new HashMap<>();
-            if (isDebug) {
-                System.out.println("Directory!");
-            }
-            File[] tempFileList = file.listFiles();
-            for (int i = 0; i < Objects.requireNonNull(tempFileList).length; i++) {
-                if (tempFileList[i].isFile()) {
-                    body = body.concat("File: " + tempFileList[i].getName() + "\r\n");
-                    if (isDebug) {
-                        System.out.println("File: " + tempFileList[i].getName());
-                    }
-                } else if (tempFileList[i].isDirectory()) {
-                    body = body.concat("Directory: " + tempFileList[i].getName());
-                    if (isDebug) {
-                        System.out.println("Directory: " + tempFileList[i].getName());
-                    }
-                }
-            }
-            headers.put("content-type", "text/plain");
-            headers.put("content-length", String.valueOf(body.length()));
-            headers.put("content-disposition", "inline");
 
-            this.response = new Response(status, headers, body);
-        } else {
-            noPermissionHandler();
+        String status = "200 OK";
+        String body = "";
+        HashMap headers = new HashMap<>();
+
+        File[] tempFileList = file.listFiles();
+        for (int i = 0; i < Objects.requireNonNull(tempFileList).length; i++) {
+            if (tempFileList[i].isFile()) {
+                body = body.concat("File: " + tempFileList[i].getName() + "\r\n");
+            } else if (tempFileList[i].isDirectory()) {
+                body = body.concat("Directory: " + tempFileList[i].getName() + "\r\n");
+            }
         }
-    }
+        headers.put("content-type", "text/plain");
+        headers.put("content-disposition", "inline");
 
+        this.response = new Response(status, headers, body);
+
+    }
 
     public void readFileHandler() {
 
-        if (!isInsideFolder()) {
-            noPermissionHandler();
-            return;
-        }
         RandomAccessFile raf = null;
         FileChannel fc = null;
         FileLock fl = null;
@@ -132,40 +115,34 @@ public class HttpfsServiceThread extends Thread {
                     fl = fc.tryLock(0, Long.MAX_VALUE, true);
                     if (fl != null) {
                         if (isDebug) {
-                            System.out.println("isShared: " + fl.isShared());
-                            System.out.println(Thread.currentThread().getName() + " get the shared read lock");
+                            System.out.println("[INFO] File lock isShared: " + fl.isShared());
+                            System.out.println("[INFO] " + Thread.currentThread().getName() + " get the shared read lock");
                         }
                     }
+
+                    // Slow down the read file speed
                     try {
-                        sleep(1000);
+                        sleep(3000);
                     } catch (InterruptedException e1) {
                         e1.printStackTrace();
                     }
+
                     break;
                 } catch (Exception e) {
                     //如果是同一进程的多线程，重复请求tryLock()会抛出OverlappingFileLockException异常
                     if (isDebug) {
                         sleep(1000);
-                        System.out.println(Thread.currentThread().getName() + " is waiting");
+                        System.out.println("[INFO] " + Thread.currentThread().getName() + " is waiting");
                     }
                 }
             }
-            //获得文件锁权限后，进行相应的操作
+
+            // Create Response
             String status = "200 OK";
             String body = "";
             HashMap headers = new HashMap<>();
-            if (isDebug) {
-                System.out.println("File!");
-            }
-            // This is a sample of getting the MIME type for content-Type Header
-            try {
-                if (isDebug) {
-                    System.out.println(getMIME(path));
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            // Read a File
+
+            // Read the target file
             String fileContent = "";
             Scanner myReader = null;
             try {
@@ -173,31 +150,29 @@ public class HttpfsServiceThread extends Thread {
                 while (myReader.hasNextLine()) {
                     String data = myReader.nextLine();
                     fileContent = fileContent.concat(data);
-                    if (isDebug) {
-                        System.out.println(data);
-                    }
                 }
                 myReader.close();
             } catch (FileNotFoundException e) {
                 e.printStackTrace();
             }
             body = fileContent;
-            headers.put("content-type", "text/plain");
-            headers.put("content-length", String.valueOf(body.length()));
-            headers.put("content-disposition", "attachment; filename=\"new_file.txt\"");
-            this.response = new Response(status, headers, body);
             if (isDebug) {
-//                System.out.println(this.threadName+" : read success!");
-                System.out.println(Thread.currentThread().getName() + " reads success!");
+                System.out.println("[INFO] " + Thread.currentThread().getName() + " reads successfully!");
             }
+
             //release lock
             fl.release();
             if (isDebug) {
-//                System.out.println(this.threadName+" : release lock");
-                System.out.println(Thread.currentThread().getName() + " releases lock");
+                System.out.println("[INFO] " + Thread.currentThread().getName() + " releases file lock");
             }
             fc.close();
             raf.close();
+
+            // Add header
+            headers.put("content-type", getMIME(path));
+            headers.put("content-disposition", "attachment; filename=" + file.getName());
+            this.response = new Response(status, headers, body);
+
         } catch (Exception e) {
             e.printStackTrace();
         } finally {
@@ -213,10 +188,7 @@ public class HttpfsServiceThread extends Thread {
     }
 
     public void writeFileHandler() {
-        if (!isInsideFolder()) {
-            noPermissionHandler();
-            return;
-        }
+
         RandomAccessFile raf = null;
         FileChannel fc = null;
         FileLock fl = null;
@@ -226,35 +198,34 @@ public class HttpfsServiceThread extends Thread {
             raf = new RandomAccessFile(this.file, "rw");
             fc = raf.getChannel();
             try {
-                //无参独占锁
                 fl = fc.tryLock();
                 if (fl != null) {
                     if (isDebug) {
-                        System.out.println("Is shared: " + fl.isShared());
-                        System.out.println(Thread.currentThread().getName() + " gets the write lock");
+                        System.out.println("[INFO] File lock isShared: " + fl.isShared());
+                        System.out.println("[INFO]" + Thread.currentThread().getName() + " gets the write lock");
                     }
                 }
             } catch (Exception e) {
                 //如果是同一进程的多线程，重复请求tryLock()会抛出OverlappingFileLockException异常
                 if (isDebug) {
-                    System.out.println(Thread.currentThread().getName() + " is block");
+                    System.out.println("[INFO] " + Thread.currentThread().getName() + " is block");
                 }
-                fileIsLockHandler();
+                fileIsLockResponseHandler();
                 return;
             }
 
             //获得文件锁权限后，进行相应的操作
             if (isDebug) {
-                System.out.println(Thread.currentThread().getName() + " is writing a file!");
+                System.out.println("[INFO] " + Thread.currentThread().getName() + " is writing a file!");
             }
-            //  Write to file
+
             // clear the file
             PrintWriter writer = new PrintWriter(file);
             writer.print("");
             writer.close();
 
+            // write new content to the file
             in = new ByteArrayInputStream(this.request.getBody().getBytes());
-
             byte[] b = new byte[1024];
             int len = 0;
             ByteBuffer bb = ByteBuffer.allocate(1024);
@@ -263,21 +234,25 @@ public class HttpfsServiceThread extends Thread {
                 bb.put(b, 0, len);
                 bb.flip();
                 fc.write(bb);
+            }
 
-            }
+            // Slow down the write speed
             Thread.sleep(5000);
-            String status = "200 OK";
-            HashMap headers = new HashMap<>();
-            String body = "Write succesful";
-            this.response = new Response(status, headers, body);
-            if (isDebug) {
-                System.out.println(Thread.currentThread().getName() + " writing success!");
-            }
+
             //release lock
             fl.release();
             if (isDebug) {
 //                System.out.println(this.threadName+" : release lock");
-                System.out.println(Thread.currentThread().getName() + " releases lock");
+                System.out.println("[INFO]" + Thread.currentThread().getName() + " releases lock");
+            }
+
+            String status = "200 OK";
+            HashMap headers = new HashMap<>();
+            String body = "Successfully written to file " + file.getName();
+            this.response = new Response(status, headers, body);
+
+            if (isDebug) {
+                System.out.println("[INFO]" + Thread.currentThread().getName() + "Successfully written to file " + file.getName());
             }
 
             fc.close();
@@ -296,11 +271,7 @@ public class HttpfsServiceThread extends Thread {
 
     }
 
-    public void fileNotExistHandler() {
-        if (isDebug) {
-            System.out.println("File does not exist!");
-        }
-        // TODO: Create a 404 Response
+    public void fileNotExistResponseHandler() {
         String status = "404 Not Found";
         String body = "404 File does not exist!";
 
@@ -312,67 +283,53 @@ public class HttpfsServiceThread extends Thread {
         this.response = new Response(status, headers, body);
     }
 
+    public void noPermissionResponseHandler() {
+
+        String status = "403 Forbidden";
+        String body = "Forbidden";
+
+        HashMap headers = new HashMap<>();
+        headers.put("content-type", "text/plain");
+        headers.put("content-length", String.valueOf(body.length()));
+        headers.put("content-disposition", "inline");
+
+        this.response = new Response(status, headers, body);
+    }
+
+    public void fileIsLockResponseHandler() {
+
+        String status = "403 Forbidden";
+        String body = "Other thread is processing the file";
+
+        HashMap headers = new HashMap<>();
+        headers.put("content-type", "text/plain");
+        headers.put("content-length", String.valueOf(body.length()));
+        headers.put("content-disposition", "inline");
+
+        this.response = new Response(status, headers, body);
+
+    }
+
+    public void methodNotAllowedResponseHandler() {
+
+        String status = "405 Method Not Allowed";
+        String body = "Method Not Allowed";
+
+        HashMap headers = new HashMap<>();
+        headers.put("content-type", "text/plain");
+        headers.put("content-length", String.valueOf(body.length()));
+        headers.put("content-disposition", "inline");
+
+        this.response = new Response(status, headers, body);
+
+    }
+
     public static String getMIME(Path path) throws IOException {
         return Files.probeContentType(path);
     }
 
     public boolean isInsideFolder() {
-
-        return true;
-//        if (isDebug) {
-//            System.out.println("valid path: " + this.directory);
-//            System.out.println("filepath: " + this.filePath);
-//            System.out.println(this.file);
-//        }
-//        if (this.directory.equals(HttpfsService.DEFAULT_DIRECTORY)) {
-//            return true;
-//        }
-//        if (this.filePath.contains(this.directory)) {
-//            return true;
-//        } else {
-//            return false;
-//        }
-
+        return !this.path.toString().contains("..");
     }
 
-    public void noPermissionHandler() {
-//        TODO: Create a 403 file forbidden Response
-        String status = "403 file path control: Forbidden";
-        String body = "403 file path control: Forbidden";
-
-        HashMap headers = new HashMap<>();
-        headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
-        headers.put("content-disposition", "inline");
-
-        this.response = new Response(status, headers, body);
-
-    }
-
-    public void fileIsLockHandler() {
-        String status = "403 Forbidden: other thread is processing the file";
-        String body = "403 Forbidden: other thread is processing the file";
-
-        HashMap headers = new HashMap<>();
-        headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
-        headers.put("content-disposition", "inline");
-
-        this.response = new Response(status, headers, body);
-
-    }
-
-    public void methodNotAllowedHandler() {
-//        TODO: Create a 405 Response
-        String status = "405 Method Not Allowed";
-        String body = "405 Method Not Allowed";
-
-        HashMap headers = new HashMap<>();
-        headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
-        headers.put("content-disposition", "inline");
-
-        this.response = new Response(status, headers, body);
-
-    }
 }

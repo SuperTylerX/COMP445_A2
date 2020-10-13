@@ -121,10 +121,10 @@ public class HttpfsServiceThread extends Thread {
         FileLock fl = null;
 
         try {
-            raf = new RandomAccessFile(this.file, "rw");
+            raf = new RandomAccessFile(this.file, "r");
             fc = raf.getChannel();
             //此处主要是针对多线程获取文件锁时轮询锁的状态。如果只是单纯获得锁的话，直接fl = fc.tryLock();即可
-            while(true) {
+            while (true) {
                 try {
                     //无参独占锁
                     //fl = fc.tryLock();
@@ -132,8 +132,8 @@ public class HttpfsServiceThread extends Thread {
                     fl = fc.tryLock(0, Long.MAX_VALUE, true);
                     if (fl != null) {
                         if (isDebug) {
-                            System.out.println(fl.isShared());
-                            System.out.println("get the shared lock");
+                            System.out.println("isShared: " + fl.isShared());
+                            System.out.println(Thread.currentThread().getName() + " get the shared read lock");
                         }
                     }
                     try {
@@ -146,7 +146,7 @@ public class HttpfsServiceThread extends Thread {
                     //如果是同一进程的多线程，重复请求tryLock()会抛出OverlappingFileLockException异常
                     if (isDebug) {
                         sleep(1000);
-                        System.out.println("current thread is waiting");
+                        System.out.println(Thread.currentThread().getName() + " is waiting");
                     }
                 }
             }
@@ -188,13 +188,13 @@ public class HttpfsServiceThread extends Thread {
             this.response = new Response(status, headers, body);
             if (isDebug) {
 //                System.out.println(this.threadName+" : read success!");
-                System.out.println("read success!");
+                System.out.println(Thread.currentThread().getName() + " reads success!");
             }
             //release lock
             fl.release();
             if (isDebug) {
 //                System.out.println(this.threadName+" : release lock");
-                System.out.println("release lock");
+                System.out.println(Thread.currentThread().getName() + " releases lock");
             }
             fc.close();
             raf.close();
@@ -231,13 +231,13 @@ public class HttpfsServiceThread extends Thread {
                 if (fl != null) {
                     if (isDebug) {
                         System.out.println("Is shared: " + fl.isShared());
-                        System.out.println("get the lock");
+                        System.out.println(Thread.currentThread().getName() + " gets the write lock");
                     }
                 }
             } catch (Exception e) {
                 //如果是同一进程的多线程，重复请求tryLock()会抛出OverlappingFileLockException异常
                 if (isDebug) {
-                    System.out.println("current thread is block");
+                    System.out.println(Thread.currentThread().getName() + " is block");
                 }
                 fileIsLockHandler();
                 return;
@@ -245,7 +245,7 @@ public class HttpfsServiceThread extends Thread {
 
             //获得文件锁权限后，进行相应的操作
             if (isDebug) {
-                System.out.println("Writing a file!");
+                System.out.println(Thread.currentThread().getName() + " is writing a file!");
             }
             //  Write to file
             // clear the file
@@ -258,7 +258,7 @@ public class HttpfsServiceThread extends Thread {
             byte[] b = new byte[1024];
             int len = 0;
             ByteBuffer bb = ByteBuffer.allocate(1024);
-            while((len=in.read(b))!=-1){
+            while ((len = in.read(b)) != -1) {
                 bb.clear();
                 bb.put(b, 0, len);
                 bb.flip();
@@ -271,14 +271,13 @@ public class HttpfsServiceThread extends Thread {
             String body = "Write succesful";
             this.response = new Response(status, headers, body);
             if (isDebug) {
-//                System.out.println(this.threadName+" : read success!");
-                System.out.println("write success!");
+                System.out.println(Thread.currentThread().getName() + " writing success!");
             }
             //release lock
             fl.release();
             if (isDebug) {
 //                System.out.println(this.threadName+" : release lock");
-                System.out.println("release lock");
+                System.out.println(Thread.currentThread().getName() + " releases lock");
             }
 
             fc.close();

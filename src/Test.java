@@ -13,13 +13,20 @@ public class Test {
 //
         HttpfsServiceThread hfst2 = new HttpfsServiceThread(new HttpfsService("-v -p 8080 -d ./test".split(" ")), new Request("GET", new HashMap<>(), "", "/C.txt"));
 //
-        hfst.start();
+        HttpfsServiceThread hfst3 = new HttpfsServiceThread(new HttpfsService("-v -p 8080 -d ./test".split(" ")), new Request("GET", new HashMap<>(), "", "/C.txt"));
+//
+
         try {
+            hfst.start();
             Thread.sleep(500);
+            System.out.println("*********************************");
+            hfst2.start();
+            Thread.sleep(500);
+            System.out.println("*********************************");
+            hfst3.start();
         } catch (InterruptedException e) {
             e.printStackTrace();
         }
-        System.out.println("*********************************");
-        hfst2.start();
+
     }
 }

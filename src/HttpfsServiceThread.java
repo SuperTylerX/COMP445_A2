@@ -1,4 +1,5 @@
 import java.io.*;
+import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -10,8 +11,8 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
-
-import static java.lang.Thread.sleep;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public class HttpfsServiceThread extends Thread {
 
@@ -20,20 +21,78 @@ public class HttpfsServiceThread extends Thread {
     private File file;
     private Request request;
     private Response response;
-
+    private Socket socket;
     private boolean isDebug;
 
 
-    public HttpfsServiceThread(HttpfsService hfs, Request request) {
+    public HttpfsServiceThread(HttpfsService hfs, Socket socket) throws IOException {
+        this.socket = socket;
         this.directory = hfs.getDirectory();
+        this.isDebug = hfs.isDebug();
+        this.init();
+    }
+
+    public void init() throws IOException {
+        String requestString = getRequestString();
+        if (isDebug) {
+            System.out.println("\n>>>>>>>>>>>>>>>>>>>>>>>");
+            System.out.println(requestString);
+            System.out.println(">>>>>>>>>>>>>>>>>>>>>>>\n");
+        }
+
+        this.request = new Request(requestString);
         String filePath = request.getPath();
         this.path = Paths.get(directory + filePath);
         this.file = new File(path.toString());
-        this.request = request;
-        this.response = new Response();
 
-        this.isDebug = hfs.isDebug();
+    }
 
+    public String getRequestString() throws IOException {
+
+        if (isDebug) {
+            System.out.println("[INFO] Processing the request start");
+        }
+        InputStream inputStream = socket.getInputStream();
+        // Create request reader
+        StringBuilder requestString = new StringBuilder();
+        int data = inputStream.read();
+        StringBuilder line = new StringBuilder();
+
+        boolean isBody = false;
+        int content_length = 0;
+        while (data != -1) {
+            requestString.append((char) data);
+            line.append((char) data);
+
+            if (isBody) {
+                if (line.length() == content_length) {
+                    break;
+                }
+            } else {
+                if (line.toString().contains("\r\n")) {
+                    if (line.toString().toLowerCase().contains("content-length")) {
+                        Pattern pattern = Pattern.compile("content-length:\\s*(\\d+)");
+                        Matcher matcher = pattern.matcher(line.toString().toLowerCase());
+                        if (matcher.find()) {
+                            content_length = Integer.parseInt(matcher.group(1));
+                        }
+                    } else if (line.toString().equals("\r\n")) {
+                        isBody = true;
+                        if (content_length == 0) {
+                            break;
+                        }
+                    }
+                    line = new StringBuilder();
+                }
+            }
+
+            data = inputStream.read();
+        }
+
+        if (isDebug) {
+            System.out.println("[INFO] Processing the request finish");
+        }
+        return requestString.toString();
     }
 
     public void run() {
@@ -74,6 +133,14 @@ public class HttpfsServiceThread extends Thread {
             System.out.println("<<<<<<<<<<<<<<<<<<<<<<<<\r\n");
         }
 
+        try {
+            OutputStream outputStream = socket.getOutputStream();
+            outputStream.write(response.toString().getBytes());
+            outputStream.flush();
+            socket.close();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
     }
 
     public void readDirectoryHandler() {
@@ -329,7 +396,22 @@ public class HttpfsServiceThread extends Thread {
     }
 
     public boolean isInsideFolder() {
-        return !this.path.toString().contains("..");
+
+        File directoryFile = new File(this.directory);
+        File requestFile = this.file;
+
+        try {
+            String directoryFileCanonicalPath = directoryFile.getCanonicalPath();
+            String requestFileCanonicalPath = requestFile.getCanonicalPath();
+            return requestFileCanonicalPath.contains(directoryFileCanonicalPath);
+
+        } catch (IOException e) {
+            e.printStackTrace();
+            return false;
+        }
+
+
+//        return !this.path.toString().contains("..");
     }
 
 }

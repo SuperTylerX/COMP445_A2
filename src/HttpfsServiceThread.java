@@ -34,6 +34,7 @@ public class HttpfsServiceThread extends Thread {
 
     public void init() throws IOException {
         String requestString = getRequestString();
+
         if (isDebug) {
             System.out.println("\n>>>>>>>>>>>>>>>>>>>>>>>");
             System.out.println(requestString);
@@ -49,9 +50,6 @@ public class HttpfsServiceThread extends Thread {
 
     public String getRequestString() throws IOException {
 
-        if (isDebug) {
-            System.out.println("[INFO] Processing the request start");
-        }
         InputStream inputStream = socket.getInputStream();
         // Create request reader
         StringBuilder requestString = new StringBuilder();
@@ -89,13 +87,14 @@ public class HttpfsServiceThread extends Thread {
             data = inputStream.read();
         }
 
-        if (isDebug) {
-            System.out.println("[INFO] Processing the request finish");
-        }
         return requestString.toString();
     }
 
     public void run() {
+
+        if (isDebug) {
+            System.out.println("[INFO] " + Thread.currentThread().getName() + " is created for processing the request");
+        }
 
         if (!isInsideFolder()) {
             noPermissionResponseHandler();
@@ -104,7 +103,7 @@ public class HttpfsServiceThread extends Thread {
                 if (file.exists()) {
                     if (file.isDirectory()) {
                         readDirectoryHandler();
-                    } else {
+                    } else if (file.isFile()) {
                         readFileHandler();
                     }
                 } else {
@@ -112,12 +111,8 @@ public class HttpfsServiceThread extends Thread {
                 }
 
             } else if (request.getMethod().equals("POST")) {
-                if (file.exists()) {
-                    if (file.isDirectory()) {
-                        fileNotExistResponseHandler();
-                    } else {
-                        writeFileHandler();
-                    }
+                if (file.exists() && file.isDirectory()) {
+                    directoryAlreadyExistResponseHandler();
                 } else {
                     writeFileHandler();
                 }
@@ -141,6 +136,12 @@ public class HttpfsServiceThread extends Thread {
         } catch (IOException e) {
             e.printStackTrace();
         }
+
+
+        if (isDebug) {
+            System.out.println(Thread.currentThread().getName() + " finished");
+        }
+
     }
 
     public void readDirectoryHandler() {
@@ -173,17 +174,13 @@ public class HttpfsServiceThread extends Thread {
         try {
             raf = new RandomAccessFile(this.file, "r");
             fc = raf.getChannel();
-            //此处主要是针对多线程获取文件锁时轮询锁的状态。如果只是单纯获得锁的话，直接fl = fc.tryLock();即可
             while (true) {
                 try {
-                    //无参独占锁
-                    //fl = fc.tryLock();
-                    //采用共享锁
                     fl = fc.tryLock(0, Long.MAX_VALUE, true);
                     if (fl != null) {
                         if (isDebug) {
-                            System.out.println("[INFO] File lock isShared: " + fl.isShared());
-                            System.out.println("[INFO] " + Thread.currentThread().getName() + " get the shared read lock");
+//                            System.out.println("[INFO] File lock isShared: " + fl.isShared());
+                            System.out.println("[INFO] " + Thread.currentThread().getName() + " get " + file.getName() + " shared read lock");
                         }
                     }
 
@@ -196,10 +193,9 @@ public class HttpfsServiceThread extends Thread {
 
                     break;
                 } catch (Exception e) {
-                    //如果是同一进程的多线程，重复请求tryLock()会抛出OverlappingFileLockException异常
                     if (isDebug) {
                         sleep(1000);
-                        System.out.println("[INFO] " + Thread.currentThread().getName() + " is waiting");
+                        System.out.println("[INFO] " + Thread.currentThread().getName() + " is waiting for " + file.getName() + " read lock");
                     }
                 }
             }
@@ -236,12 +232,15 @@ public class HttpfsServiceThread extends Thread {
             raf.close();
 
             // Add header
-            headers.put("content-type", getMIME(path));
+            if (getMIME(path) != null) {
+                headers.put("content-type", getMIME(path));
+            }
             headers.put("content-disposition", "attachment; filename=" + file.getName());
             this.response = new Response(status, headers, body);
 
         } catch (Exception e) {
             e.printStackTrace();
+            serverInternalErrorResponseHandler();
         } finally {
             if (fl != null && fl.isValid()) {
                 try {
@@ -256,6 +255,21 @@ public class HttpfsServiceThread extends Thread {
 
     public void writeFileHandler() {
 
+        // If the parent folder does not exist, create the parent folder
+        if (!file.exists()) {
+            File parentFolder = new File(file.getParent());
+            System.out.println(parentFolder);
+            if (!parentFolder.exists()) {
+                try {
+                    boolean s = parentFolder.mkdirs();
+                    System.out.println(s);
+                } catch (SecurityException e) {
+                    serverInternalErrorResponseHandler();
+                    return;
+                }
+            }
+        }
+
         RandomAccessFile raf = null;
         FileChannel fc = null;
         FileLock fl = null;
@@ -268,12 +282,11 @@ public class HttpfsServiceThread extends Thread {
                 fl = fc.tryLock();
                 if (fl != null) {
                     if (isDebug) {
-                        System.out.println("[INFO] File lock isShared: " + fl.isShared());
-                        System.out.println("[INFO]" + Thread.currentThread().getName() + " gets the write lock");
+//                        System.out.println("[INFO] File lock isShared: " + fl.isShared());
+                        System.out.println("[INFO] " + Thread.currentThread().getName() + " gets the " + file.getName() + " write lock");
                     }
                 }
             } catch (Exception e) {
-                //如果是同一进程的多线程，重复请求tryLock()会抛出OverlappingFileLockException异常
                 if (isDebug) {
                     System.out.println("[INFO] " + Thread.currentThread().getName() + " is block");
                 }
@@ -281,9 +294,8 @@ public class HttpfsServiceThread extends Thread {
                 return;
             }
 
-            //获得文件锁权限后，进行相应的操作
             if (isDebug) {
-                System.out.println("[INFO] " + Thread.currentThread().getName() + " is writing a file!");
+                System.out.println("[INFO] " + Thread.currentThread().getName() + " is writing " + file.getName());
             }
 
             // clear the file
@@ -308,24 +320,26 @@ public class HttpfsServiceThread extends Thread {
 
             //release lock
             fl.release();
+            fc.close();
+            raf.close();
+
             if (isDebug) {
-//                System.out.println(this.threadName+" : release lock");
-                System.out.println("[INFO]" + Thread.currentThread().getName() + " releases lock");
+                System.out.println("[INFO] " + Thread.currentThread().getName() + " successfully wrote " + file.getName());
             }
 
+            if (isDebug) {
+                System.out.println("[INFO] " + Thread.currentThread().getName() + " releases lock");
+            }
             String status = "200 OK";
             HashMap headers = new HashMap<>();
+            headers.put("content-type", "text/plain");
+            headers.put("content-disposition", "inline");
             String body = "Successfully written to file " + file.getName();
             this.response = new Response(status, headers, body);
 
-            if (isDebug) {
-                System.out.println("[INFO]" + Thread.currentThread().getName() + "Successfully written to file " + file.getName());
-            }
-
-            fc.close();
-            raf.close();
         } catch (Exception e) {
             e.printStackTrace();
+            serverInternalErrorResponseHandler();
         } finally {
             if (fl != null && fl.isValid()) {
                 try {
@@ -344,7 +358,6 @@ public class HttpfsServiceThread extends Thread {
 
         HashMap headers = new HashMap<>();
         headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
         headers.put("content-disposition", "inline");
 
         this.response = new Response(status, headers, body);
@@ -357,20 +370,30 @@ public class HttpfsServiceThread extends Thread {
 
         HashMap headers = new HashMap<>();
         headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
         headers.put("content-disposition", "inline");
 
         this.response = new Response(status, headers, body);
     }
 
+    public void directoryAlreadyExistResponseHandler() {
+        String status = "403 Forbidden";
+        String body = "The file could not be created because there is a folder with the same name";
+
+        HashMap headers = new HashMap<>();
+        headers.put("content-type", "text/plain");
+        headers.put("content-disposition", "inline");
+
+        this.response = new Response(status, headers, body);
+
+    }
+
     public void fileIsLockResponseHandler() {
 
-        String status = "403 Forbidden";
+        String status = "409 Conflict";
         String body = "Other thread is processing the file";
 
         HashMap headers = new HashMap<>();
         headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
         headers.put("content-disposition", "inline");
 
         this.response = new Response(status, headers, body);
@@ -384,7 +407,19 @@ public class HttpfsServiceThread extends Thread {
 
         HashMap headers = new HashMap<>();
         headers.put("content-type", "text/plain");
-        headers.put("content-length", String.valueOf(body.length()));
+        headers.put("content-disposition", "inline");
+
+        this.response = new Response(status, headers, body);
+
+    }
+
+    public void serverInternalErrorResponseHandler() {
+
+        String status = "500 Internal Server Error";
+        String body = "Internal Server Error";
+
+        HashMap headers = new HashMap<>();
+        headers.put("content-type", "text/plain");
         headers.put("content-disposition", "inline");
 
         this.response = new Response(status, headers, body);
@@ -410,8 +445,6 @@ public class HttpfsServiceThread extends Thread {
             return false;
         }
 
-
-//        return !this.path.toString().contains("..");
     }
 
 }

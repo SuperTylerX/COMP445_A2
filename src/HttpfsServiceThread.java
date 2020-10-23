@@ -25,16 +25,18 @@ public class HttpfsServiceThread extends Thread {
     private boolean isDebug;
 
 
-    public HttpfsServiceThread(HttpfsService hfs, Socket socket) throws IOException {
+    public HttpfsServiceThread(HttpfsService hfs, Socket socket) throws Exception {
         this.socket = socket;
         this.directory = hfs.getDirectory();
         this.isDebug = hfs.isDebug();
         this.init();
     }
 
-    public void init() throws IOException {
+    public void init() throws Exception {
         String requestString = getRequestString();
-
+        if (requestString.length() == 0) {
+            throw new Exception("Unsupported HTTP version");
+        }
         if (isDebug) {
             System.out.println("\n>>>>>>>>>>>>>>>>>>>>>>>");
             System.out.println(requestString);

@@ -36,7 +36,7 @@ public class HttpfsService {
         }
     }
 
-    public void serve() throws IOException {
+    public void serve() throws Exception {
         this.listening();
     }
 
@@ -46,7 +46,7 @@ public class HttpfsService {
         System.out.println("[INFO] The server is listening on port " + port);
 
         while (true) {
-            try{
+            try {
                 Socket connection = serverSocket.accept();
                 if (isDebug) {
                     System.out.println("[INFO] Receive a Request");
@@ -56,6 +56,10 @@ public class HttpfsService {
 
             } catch (IOException e) {
                 e.printStackTrace();
+            } catch (Exception e) {
+                if (e.getMessage().equals("Unsupported HTTP version")) {
+                    System.out.println("[INFO] Unsupported HTTP version");
+                }
             }
         }
 
